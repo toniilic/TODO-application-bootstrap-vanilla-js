@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Todo App</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        .completed {
+            text-decoration: line-through;
+            opacity: 0.6;
+        }
+        .todo-item {
+            transition: all 0.3s ease;
+        }
+        .todo-item:hover {
+            transform: translateX(5px);
+        }
+        .priority-high { border-left: 5px solid #dc3545; }
+        .priority-medium { border-left: 5px solid #ffc107; }
+        .priority-low { border-left: 5px solid #28a745; }
+        #maintenance-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="mb-4">Enhanced Todo App</h1>
+        <todo-list></todo-list>
+    </div>
+    <button id="toggle-maintenance" class="btn btn-secondary mt-3">Toggle Maintenance Mode</button>
+
+    <script type="module">
+        class TodoComponent extends HTMLElement {
+            constructor() {
+                super();
+                this.attachShadow({ mode: 'open' });
+                this.sortState = {
+                    priority: 'none',
+                    date: 'none'
+                };
+            }
+
+            connectedCallback() {
+                this.render();
+                this.setupEventListeners();
+                this.loadTodos();
+            }
+
+            render() {
+                this.shadowRoot.innerHTML = `
+                    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+                    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+                    <div class="container">
+                        <form id="todo-form" class="mb-3">
+                            <div class="input-group">
+                                <input type="text" id="todo-input" class="form-control" placeholder="Enter a new todo" required>
+                                <select id="priority-select" class="form-select" style="max-width: 150px;">
+                                    <option value="low">Low Priority</option>
+                                    <option value="medium">Medium Priority</option>
+                                    <option value="high">High Priority</option>
+                                </select>
+                                <button type="submit" class="btn btn-primary">Add Todo</button>
+                            </div>
+                        </form>
+                        <div class="mb-3">
+                            <button id="sort-priority" class="btn btn-secondary me-2">Sort by Priority</button>
+                            <button id="sort-date" class="btn btn-secondary me-2">Sort by Date</button>
+                            <button id="clear-completed" class="btn btn-warning">Clear Completed</button>
+                        </div>
+                        <ul id="todo-list" class="list-group"></ul>
+                        <div class="mt-3">
+                            <p>Total tasks: <span id="total-tasks">0</span></p>
+                            <p>Completed tasks: <span id="completed-tasks">0</span></p>
+                        </div>
+                    </div>
+                `;
+            }
+
+            setupEventListeners() {
+                const form = this.shadowRoot.getElementById('todo-form');
+                form.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.addTodo();
+                });
+
+                this.shadowRoot.getElementById('sort-priority').addEventListener('click', () => this.sortTodos('priority'));
+                this.shadowRoot.getElementById('sort-date').addEventListener('click', () => this.sortTodos('date'));
+                this.shadowRoot.getElementById('clear-completed').addEventListener('click', () => this.clearCompleted());
+            }
+
+            addTodo() {
+                const input = this.shadowRoot.getElementById('todo-input');
+                const priority = this.shadowRoot.getElementById('priority-select').value;
+                const todoText = input.value.trim();
+                if (todoText) {
+                    const todos = this.getTodos();
+                    todos.push({
+                        id: Date.now(),
+                        text: todoText,
+                        completed: false,
+                        priority: priority,
+                        date: new Date().toISOString()
+                    });
+                    this.saveTodos(todos);
+                    this.renderTodos();
+                    input.value = '';
+                }
+            }
+
+            getTodos() {
+                return JSON.parse(localStorage.getItem('todos') || '[]');
+            }
+
+            saveTodos(todos) {
+                localStorage.setItem('todos', JSON.stringify(todos));
+            }
+
+            loadTodos() {
+                this.renderTodos();
+            }
+
+            renderTodos() {
+                const todoList = this.shadowRoot.getElementById('todo-list');
+                const todos = this.getTodos();
+                todoList.innerHTML = todos.map(todo => `
+                    <li class="list-group-item d-flex justify-content-between align-items-center todo-item ${todo.completed ? 'completed' : ''} priority-${todo.priority}">
+                        <span>
+                            <i class="fas fa-${todo.priority === 'high' ? 'exclamation-circle text-danger' : todo.priority === 'medium' ? 'exclamation-triangle text-warning' : 'info-circle text-success'} me-2"></i>
+                            ${todo.text}
+                        </span>
+                        <div>
+                            <small class="text-muted me-2">${new Date(todo.date).toLocaleString()}</small>
+                            <button class="btn btn-sm btn-outline-success me-2" onclick="this.getRootNode().host.toggleTodo(${todo.id})">
+                                <i class="fas fa-${todo.completed ? 'undo' : 'check'}"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="this.getRootNode().host.deleteTodo(${todo.id})">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </li>
+                `).join('');
+                this.updateStats();
+            }
+
+            toggleTodo(id) {
+                const todos = this.getTodos();
+                const todo = todos.find(t => t.id === id);
+                if (todo) {
+                    todo.completed = !todo.completed;
+                    this.saveTodos(todos);
+                    this.renderTodos();
+                }
+            }
+
+            deleteTodo(id) {
+                const todos = this.getTodos();
+                const updatedTodos = todos.filter(t => t.id !== id);
+                this.saveTodos(updatedTodos);
+                this.renderTodos();
+            }
+
+            sortTodos(criterion) {
+                const todos = this.getTodos();
+                if (criterion === 'priority') {
+                    this.sortState.priority = this.sortState.priority === 'asc' ? 'desc' : 'asc';
+                    todos.sort((a, b) => {
+                        const priorityOrder = { high: 0, medium: 1, low: 2 };
+                        return this.sortState.priority === 'asc' 
+                            ? priorityOrder[a.priority] - priorityOrder[b.priority]
+                            : priorityOrder[b.priority] - priorityOrder[a.priority];
+                    });
+                } else if (criterion === 'date') {
+                    this.sortState.date = this.sortState.date === 'asc' ? 'desc' : 'asc';
+                    todos.sort((a, b) => {
+                        return this.sortState.date === 'asc'
+                            ? new Date(a.date) - new Date(b.date)
+                            : new Date(b.date) - new Date(a.date);
+                    });
+                }
+                this.saveTodos(todos);
+                this.renderTodos();
+            }
+
+            clearCompleted() {
+                const todos = this.getTodos();
+                const updatedTodos = todos.filter(t => !t.completed);
+                this.saveTodos(updatedTodos);
+                this.renderTodos();
+            }
+
+            updateStats() {
+                const todos = this.getTodos();
+                this.shadowRoot.getElementById('total-tasks').textContent = todos.length;
+                this.shadowRoot.getElementById('completed-tasks').textContent = todos.filter(t => t.completed).length;
+            }
+        }
+
+        customElements.define('todo-list', TodoComponent);
+
+        // Maintenance mode functionality
+        let maintenanceMode = false;
+
+        function toggleMaintenanceMode() {
+            maintenanceMode = !maintenanceMode;
+            if (maintenanceMode) {
+                showMaintenanceOverlay();
+            } else {
+                hideMaintenanceOverlay();
+            }
+        }
+
+        function showMaintenanceOverlay() {
+            let overlay = document.getElementById('maintenance-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'maintenance-overlay';
+                overlay.innerHTML = `
+                    <div class="text-center">
+                        <h2>Site Undergoing Maintenance</h2>
+                        <p>We apologize for the inconvenience. Please check back later.</p>
+                        <button id="exit-maintenance" class="btn btn-light mt-3">Exit Maintenance Mode</button>
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+                document.getElementById('exit-maintenance').addEventListener('click', toggleMaintenanceMode);
+            }
+        }
+
+        function hideMaintenanceOverlay() {
+            const overlay = document.getElementById('maintenance-overlay');
+            if (overlay) {
+                overlay.remove();
+            }
+        }
+
+        document.getElementById('toggle-maintenance').addEventListener('click', toggleMaintenanceMode);
+    </script>
+</body>
+</html>
